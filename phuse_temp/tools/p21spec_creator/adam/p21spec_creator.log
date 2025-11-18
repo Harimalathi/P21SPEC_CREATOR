@@ -1,0 +1,2464 @@
+1                                           The SAS System             00:13 Tuesday, October 14, 2025
+
+NOTE: Copyright (c) 2023 by SAS Institute Inc., Cary, NC, USA. 
+NOTE: SAS (r) Proprietary Software 9.4 (TS1M8) 
+      Licensed to ASCENDIS PHARMA INC - PROD, Site 70264353.
+NOTE: This session is executing on the X64_SRV19  platform.
+
+
+
+NOTE: Analytical products:
+      
+      SAS/STAT 15.3
+      SAS/IML 15.3
+
+NOTE: Additional host information:
+
+ X64_SRV19 WIN 10.0.17763  Server
+
+NOTE: SAS initialization used:
+      real time           0.64 seconds
+      cpu time            0.63 seconds
+      
+1          /*******************************************************************************
+2          Project Name    : general
+3          Program Name    : p21spec_creator.sas
+4          Program Author  : Thomas Gulholm-Hansen (TGUH)
+5          Program Purpose : This is the main "driver program" of the p21spec-creator
+6                            package. The program contains 3 main sections:
+7                            1. Configuration and data-load - sets up the "environment" and
+8                               read the contents of the entry-files into SAS datasets
+9                               in the 'defdata' library.
+10                           2. Manipulation of spec sheet-data; this is where all the
+11                              "magic" happens, e.g., creation of actual method/comment
+12                              entries and creatoin of variables form core-groups. This
+13                              section is mostly calls to macros that do the actual work.
+14                           3. Finalization and creation of p21upload-file. The final
+15                              "sheet-dataset" are stored in the 'defdata' library (for
+16                              reference/potential future use), and the p21upload-file
+17                              is re-written - if the p21upload-file exists, and cannot
+18                              be deleted, a "personal copy" (with leading initials and
+19                              datetime) is writen
+20         
+21                           The program is intended to be placed in a folder named 'sdtm'
+22                           or 'adam' under .\tools\p21spec_creator in the standard milestone
+23                           folder structure. The sdtm/adam folder must also contain the
+24                           autoexec.sas file and a subfolder named 'data' (used for the
+25                           'defdata' library.
+26         *******************************************************************************/
+27         
+28         *******************************************************************************;
+29         * AUTOEXEC - included for demonstration purpose only ;
+30         * This sections sets a few variables that - in a production envrionemnt - would;
+31         * be set by an autoexec/initialization macro;
+32         *******************************************************************************;
+33         %global _PGMPATH _STUDYID PROGDOC;
+34         * Set the "current folder", from where the program is being executed ;
+2                                           The SAS System             00:13 Tuesday, October 14, 2025
+
+35         * (this is where the p21spec_creator code-base, and SAS dataset ;
+36         * containing "define data" are stored - in relevant sub-folders) ;
+37         %let _PGMPATH = S:\Biometrics\CNP\ASND0036\phuse_temp\tools\p21spec_creator\adam\;
+38         * Set path to the "trial level documents for programming" folder ;
+39         * (this is where (in subfolders) the "Entry-file" is read from, ;
+40         * and the "Upload-file" is written to) ;
+41         %let PROGDOC = S:\Biometrics\CNP\ASND0036\phuse_temp\progdoc;
+42         * Set the Study-ID ;
+43         * (this is used by the p21spec_creator to drive default names of the "Upload" ;
+44         * and "Entry-file" as well as the name of the "drop-column " ;
+45         %let _STUDYID = PHUSE;
+46         *******************************************************************************;
+47         * End of AUTOEXEC - The remaining program is supposed to be kept as-is ;
+48         * (maybe with a few modificatoins to the "Run configuration" section ;
+49         *******************************************************************************;
+50         
+51         *******************************************************************************;
+52         * Run configuration ;
+53         * By default, values are derived from init-variables and/or set to standard ;
+54         * values - in most cases this is expected to work "out of the box", but ;
+55         * in some cases special configuration might be needed.
+56         *******************************************************************************;
+57         
+58         * Set working directory - depending on whether program is inculded or run as "stand alone";
+59         * adding backslash to SYSINCLUDEFILEDIR to match the format of _PGMPATH ;
+60         %if "&SYSINCLUDEFILEDIR." ne "" %then %do;
+61           %let wd = &SYSINCLUDEFILEDIR.\;
+62         %end;
+63         %else %do;
+64           %let wd = &_PGMPATH.;
+65         %end;
+66         
+67         * Set STUDYCD and SCOPE (SCOPE is expected to be SDTM or ADAM.) ;
+68         %global /readonly __studycd = &_STUDYID.;
+69         %global /readonly __scope = %upcase(%scan(%str(&wd.),-1,%str(\)));
+70         
+71         * Set entry/upload file;
+72         %let entryfile = &__scope._Mapping_Specifications_Entry_&__studycd..xlsx;
+73         %let p21uploadfile = P21_UPLOAD_&__scope._Mapping_Specifications_&__studycd..xlsx;
+74         
+75         * Set name of 'drop variable';
+76         %let drop_variable = %upcase(&__studycd.);
+77         
+78         *******************************************************************************;
+79         * Derive / Set up static configuration and envrionment ;
+80         * (configuration below this point should not be needed) ;
+81         *******************************************************************************;
+82         
+83         * Define paths to the tool and data folder;
+84         %global /readonly toolpath = &wd...\macro\;
+85         %global /readonly datapath = &wd.\data;
+86         
+87         * Concatenate full paths for the entry and upload file (the upload file is not ;
+88         * readonly, as it might have to be changed in case of access conflicts ;
+3                                           The SAS System             00:13 Tuesday, October 14, 2025
+
+89         %global /readonly entryfile_path = &PROGDOC.\&__scope.\&entryfile.;
+90         %global /readonly temp_entryfile_path =
+90       ! &PROGDOC.\&__scope.\_&sysuserid._tmp_entryfile_.xlsx;
+91         %let p21uplfile_path = &PROGDOC.\&__scope.\&p21uploadfile.;
+92         %put &p21uplfile_path.;
+S:\Biometrics\CNP\ASND0036\phuse_temp\progdoc\ADAM\P21_UPLOAD_ADAM_Mapping_Specifications_PHUSE.xlsx
+93         * Set various options - most importantly is adding toolpath to sasautos and libname to data
+93       ! ;
+94         option
+95           validvarname=upcase
+96           nomprint nosource mcompilenote=all
+NOTE: Libref DEFDATA was successfully assigned as follows: 
+      Engine:        V9 
+      Physical Name: S:\Biometrics\CNP\ASND0036\phuse_temp\tools\p21spec_creator\adam\\data
+NOTE: The macro P21SPEC_SET_LOCK completed compilation without errors.
+      29 instructions 1352 bytes.
+
+NOTE: The file _FN_LOCK is:
+      Filename=S:\Biometrics\CNP\ASND0036\phuse_temp\tools\p21spec_creator\adam\\lock.p21spec_creator,
+      RECFM=V,LRECL=32767,File Size (bytes)=0,
+      Last Modified=14Oct2025:00:13:32,
+      Create Time=14Oct2025:00:13:32
+
+NOTE: 1 record was written to the file _FN_LOCK.
+      The minimum record length was 23.
+      The maximum record length was 23.
+NOTE: DATA statement used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.03 seconds
+      
+
+NOTE: The macro P21SPEC_CREATE_SHEET_META completed compilation without errors.
+      20 instructions 1912 bytes.
+
+NOTE: The data set WORK.SHEET_META has 99 observations and 9 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 99 observations read from the data set WORK.SHEET_META.
+NOTE: Duplicate BY variable(s) specified. Duplicates will be ignored.
+NOTE: The data set DEFDATA.SPEC_SHEET_META has 99 observations and 9 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: Deleting WORK.SHEET_META (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.04 seconds
+      cpu time            0.03 seconds
+4                                           The SAS System             00:13 Tuesday, October 14, 2025
+
+      
+
+
+NOTE: The infile "copy 
+      S:\Biometrics\CNP\ASND0036\phuse_temp\progdoc\ADAM\ADAM_Mapping_Specifications_Entry_PHUSE.xlsx 
+      S:\Biometrics\CNP\ASND0036\phuse_temp\progdoc\ADAM\_tguh_tmp_entryfile_.xlsx" is:
+      Unnamed Pipe Access Device,
+      
+      PROCESS=copy 
+      S:\Biometrics\CNP\ASND0036\phuse_temp\progdoc\ADAM\ADAM_Mapping_Specifications_Entry_PHUSE.xlsx 
+      S:\Biometrics\CNP\ASND0036\phuse_temp\progdoc\ADAM\_tguh_tmp_entryfile_.xlsx,
+      RECFM=V,LRECL=32767
+
+        1 file(s) copied.
+NOTE: 1 record was read from the infile "copy 
+      S:\Biometrics\CNP\ASND0036\phuse_temp\progdoc\ADAM\ADAM_Mapping_Specifications_Entry_PHUSE.xlsx 
+      S:\Biometrics\CNP\ASND0036\phuse_temp\progdoc\ADAM\_tguh_tmp_entryfile_.xlsx".
+      The minimum record length was 25.
+      The maximum record length was 25.
+NOTE: DATA statement used (Total process time):
+      real time           0.28 seconds
+      cpu time            0.03 seconds
+      
+
+NOTE: The macro P21SPEC_EXCEL_IMPORT completed compilation without errors.
+      110 instructions 7296 bytes.
+NOTE: The macro P21SPEC_CLEANWORK completed compilation without errors.
+      57 instructions 2184 bytes.
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 0 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 2 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet)='DEFINE';
+NOTE: The data set WORK._IMPORT_META has 2 observations and 7 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: One or more variables were converted because the data type is not supported by the V9 engine. 
+      For more details, run with options MSGLEVEL=I.
+NOTE: The import data set has 15 observations and 4 variables.
+NOTE: WORK._RAW_IMPORT_DEFINE data set was successfully created.
+NOTE: PROCEDURE IMPORT used (Total process time):
+      real time           1.56 seconds
+      cpu time            0.78 seconds
+      
+
+5                                           The SAS System             00:13 Tuesday, October 14, 2025
+
+
+NOTE: There were 15 observations read from the data set WORK._RAW_IMPORT_DEFINE.
+NOTE: The data set WORK._IMPORT_DEFINE has 15 observations and 4 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 1 observations read from the data set WORK._IMPORT_DEFINE.
+NOTE: The data set WORK._IMPORT_DEFINE_VARS has 4 observations and 2 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.03 seconds
+      
+
+NOTE: Table WORK._PREP_COLUMN_META created, with 4 rows and 12 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.04 seconds
+      cpu time            0.04 seconds
+      
+
+
+NOTE: There were 3 observations read from the data set WORK._PREP_COLUMN_META.
+      WHERE (in_spec+in_data)>0;
+NOTE: The data set WORK._COLUMN_META has 3 observations and 12 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 3 observations read from the data set WORK._COLUMN_META.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 97 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet) not = 'DEFINE';
+NOTE: There were 3 observations read from the data set WORK._COLUMN_META.
+NOTE: The data set DEFDATA.SPEC_SHEET_META has 100 observations and 13 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+6                                           The SAS System             00:13 Tuesday, October 14, 2025
+
+
+NOTE: There were 14 observations read from the data set WORK._IMPORT_DEFINE.
+      WHERE UPCASE(PHUSE) not = 'DROP';
+NOTE: The data set DEFDATA.ENTRY_DEFINE has 14 observations and 4 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: Deleting WORK._COLUMN_META (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_DEFINE (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_DEFINE_VARS (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_META (memtype=DATA).
+NOTE: Deleting WORK._PREP_COLUMN_META (memtype=DATA).
+NOTE: Deleting WORK._RAW_IMPORT_DEFINE (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 0 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 12 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet)='DATASETS';
+NOTE: The data set WORK._IMPORT_META has 12 observations and 11 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: One or more variables were converted because the data type is not supported by the V9 engine. 
+      For more details, run with options MSGLEVEL=I.
+NOTE: The import data set has 50 observations and 15 variables.
+NOTE: WORK._RAW_IMPORT_DATASETS data set was successfully created.
+NOTE: PROCEDURE IMPORT used (Total process time):
+      real time           0.77 seconds
+      cpu time            0.78 seconds
+      
+
+
+7                                           The SAS System             00:13 Tuesday, October 14, 2025
+
+NOTE: There were 50 observations read from the data set WORK._RAW_IMPORT_DATASETS.
+NOTE: The data set WORK._IMPORT_DATASETS has 23 observations and 15 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1 observations read from the data set WORK._IMPORT_DATASETS.
+NOTE: The data set WORK._IMPORT_DATASETS_VARS has 15 observations and 2 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK._PREP_COLUMN_META created, with 15 rows and 16 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 15 observations read from the data set WORK._PREP_COLUMN_META.
+      WHERE (in_spec+in_data)>0;
+NOTE: The data set WORK._COLUMN_META has 15 observations and 12 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 15 observations read from the data set WORK._COLUMN_META.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 88 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet) not = 'DATASETS';
+NOTE: There were 15 observations read from the data set WORK._COLUMN_META.
+NOTE: The data set DEFDATA.SPEC_SHEET_META has 103 observations and 13 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+8                                           The SAS System             00:13 Tuesday, October 14, 2025
+
+NOTE: There were 21 observations read from the data set WORK._IMPORT_DATASETS.
+      WHERE UPCASE(PHUSE) not = 'DROP';
+NOTE: The data set DEFDATA.ENTRY_DATASETS has 21 observations and 16 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: Deleting WORK._COLUMN_META (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_DATASETS (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_DATASETS_VARS (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_META (memtype=DATA).
+NOTE: Deleting WORK._PREP_COLUMN_META (memtype=DATA).
+NOTE: Deleting WORK._RAW_IMPORT_DATASETS (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 0 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 29 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet)='VARIABLES';
+NOTE: The data set WORK._IMPORT_META has 29 observations and 11 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: One or more variables were converted because the data type is not supported by the V9 engine. 
+      For more details, run with options MSGLEVEL=I.
+NOTE: The import data set has 962 observations and 30 variables.
+NOTE: WORK._RAW_IMPORT_VARIABLES data set was successfully created.
+NOTE: PROCEDURE IMPORT used (Total process time):
+      real time           1.13 seconds
+      cpu time            1.14 seconds
+      
+
+
+NOTE: There were 962 observations read from the data set WORK._RAW_IMPORT_VARIABLES.
+9                                           The SAS System             00:13 Tuesday, October 14, 2025
+
+NOTE: The data set WORK._IMPORT_VARIABLES has 962 observations and 30 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 1 observations read from the data set WORK._IMPORT_VARIABLES.
+NOTE: The data set WORK._IMPORT_VARIABLES_VARS has 30 observations and 2 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK._PREP_COLUMN_META created, with 31 rows and 16 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.04 seconds
+      
+
+
+NOTE: There were 31 observations read from the data set WORK._PREP_COLUMN_META.
+      WHERE (in_spec+in_data)>0;
+NOTE: The data set WORK._COLUMN_META has 31 observations and 12 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 31 observations read from the data set WORK._COLUMN_META.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 74 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet) not = 'VARIABLES';
+NOTE: There were 31 observations read from the data set WORK._COLUMN_META.
+NOTE: The data set DEFDATA.SPEC_SHEET_META has 105 observations and 13 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 813 observations read from the data set WORK._IMPORT_VARIABLES.
+10                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+      WHERE UPCASE(PHUSE) not = 'DROP';
+NOTE: The data set DEFDATA.ENTRY_VARIABLES has 813 observations and 31 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: Deleting WORK._COLUMN_META (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_META (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_VARIABLES (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_VARIABLES_VARS (memtype=DATA).
+NOTE: Deleting WORK._PREP_COLUMN_META (memtype=DATA).
+NOTE: Deleting WORK._RAW_IMPORT_VARIABLES (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 0 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 26 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet)='VALUELEVEL';
+NOTE: The data set WORK._IMPORT_META has 26 observations and 11 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: One or more variables were converted because the data type is not supported by the V9 engine. 
+      For more details, run with options MSGLEVEL=I.
+NOTE: The import data set has 473 observations and 36 variables.
+NOTE: WORK._RAW_IMPORT_VALUELEVEL data set was successfully created.
+NOTE: PROCEDURE IMPORT used (Total process time):
+      real time           0.85 seconds
+      cpu time            0.85 seconds
+      
+
+
+NOTE: There were 473 observations read from the data set WORK._RAW_IMPORT_VALUELEVEL.
+NOTE: The data set WORK._IMPORT_VALUELEVEL has 473 observations and 36 variables.
+11                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 1 observations read from the data set WORK._IMPORT_VALUELEVEL.
+NOTE: The data set WORK._IMPORT_VALUELEVEL_VARS has 36 observations and 2 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK._PREP_COLUMN_META created, with 36 rows and 16 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.04 seconds
+      cpu time            0.04 seconds
+      
+
+
+NOTE: There were 28 observations read from the data set WORK._PREP_COLUMN_META.
+      WHERE (in_spec+in_data)>0;
+NOTE: The data set WORK._COLUMN_META has 28 observations and 12 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 28 observations read from the data set WORK._COLUMN_META.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 79 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet) not = 'VALUELEVEL';
+NOTE: There were 28 observations read from the data set WORK._COLUMN_META.
+NOTE: The data set DEFDATA.SPEC_SHEET_META has 107 observations and 13 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 472 observations read from the data set WORK._IMPORT_VALUELEVEL.
+      WHERE UPCASE(PHUSE) not = 'DROP';
+12                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+NOTE: The data set DEFDATA.ENTRY_VALUELEVEL has 472 observations and 29 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: Deleting WORK._COLUMN_META (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_META (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_VALUELEVEL (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_VALUELEVEL_VARS (memtype=DATA).
+NOTE: Deleting WORK._PREP_COLUMN_META (memtype=DATA).
+NOTE: Deleting WORK._RAW_IMPORT_VALUELEVEL (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 0 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 10 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet)='CODELISTS';
+NOTE: The data set WORK._IMPORT_META has 10 observations and 11 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: One or more variables were converted because the data type is not supported by the V9 engine. 
+      For more details, run with options MSGLEVEL=I.
+NOTE: The import data set has 2 observations and 11 variables.
+NOTE: WORK._RAW_IMPORT_CODELISTS data set was successfully created.
+NOTE: PROCEDURE IMPORT used (Total process time):
+      real time           0.78 seconds
+      cpu time            0.78 seconds
+      
+
+
+NOTE: There were 2 observations read from the data set WORK._RAW_IMPORT_CODELISTS.
+NOTE: The data set WORK._IMPORT_CODELISTS has 1 observations and 11 variables.
+NOTE: DATA statement used (Total process time):
+13                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 1 observations read from the data set WORK._IMPORT_CODELISTS.
+NOTE: The data set WORK._IMPORT_CODELISTS_VARS has 11 observations and 2 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK._PREP_COLUMN_META created, with 11 rows and 16 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.04 seconds
+      
+
+
+NOTE: There were 11 observations read from the data set WORK._PREP_COLUMN_META.
+      WHERE (in_spec+in_data)>0;
+NOTE: The data set WORK._COLUMN_META has 11 observations and 12 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 11 observations read from the data set WORK._COLUMN_META.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 97 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet) not = 'CODELISTS';
+NOTE: There were 11 observations read from the data set WORK._COLUMN_META.
+NOTE: The data set DEFDATA.SPEC_SHEET_META has 108 observations and 13 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 1 observations read from the data set WORK._IMPORT_CODELISTS.
+NOTE: The data set DEFDATA.ENTRY_CODELISTS has 0 observations and 12 variables.
+NOTE: DATA statement used (Total process time):
+14                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: Deleting WORK._COLUMN_META (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_CODELISTS (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_CODELISTS_VARS (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_META (memtype=DATA).
+NOTE: Deleting WORK._PREP_COLUMN_META (memtype=DATA).
+NOTE: Deleting WORK._RAW_IMPORT_CODELISTS (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 0 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet)='DICTIONARIES';
+NOTE: The data set WORK._IMPORT_META has 5 observations and 11 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: One or more variables were converted because the data type is not supported by the V9 engine. 
+      For more details, run with options MSGLEVEL=I.
+NOTE: The import data set has 30 observations and 6 variables.
+NOTE: WORK._RAW_IMPORT_DICTIONARIES data set was successfully created.
+NOTE: PROCEDURE IMPORT used (Total process time):
+      real time           0.80 seconds
+      cpu time            0.81 seconds
+      
+
+
+NOTE: There were 30 observations read from the data set WORK._RAW_IMPORT_DICTIONARIES.
+NOTE: The data set WORK._IMPORT_DICTIONARIES has 6 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+15                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+      
+
+
+NOTE: There were 1 observations read from the data set WORK._IMPORT_DICTIONARIES.
+NOTE: The data set WORK._IMPORT_DICTIONARIES_VARS has 6 observations and 2 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK._PREP_COLUMN_META created, with 6 rows and 16 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.06 seconds
+      
+
+
+NOTE: There were 6 observations read from the data set WORK._PREP_COLUMN_META.
+      WHERE (in_spec+in_data)>0;
+NOTE: The data set WORK._COLUMN_META has 6 observations and 12 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 6 observations read from the data set WORK._COLUMN_META.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 103 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet) not = 'DICTIONARIES';
+NOTE: There were 6 observations read from the data set WORK._COLUMN_META.
+NOTE: The data set DEFDATA.SPEC_SHEET_META has 109 observations and 13 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK._IMPORT_DICTIONARIES.
+      WHERE UPCASE(PHUSE) not = 'DROP';
+NOTE: The data set DEFDATA.ENTRY_DICTIONARIES has 5 observations and 7 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+16                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: Deleting WORK._COLUMN_META (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_DICTIONARIES (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_DICTIONARIES_VARS (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_META (memtype=DATA).
+NOTE: Deleting WORK._PREP_COLUMN_META (memtype=DATA).
+NOTE: Deleting WORK._RAW_IMPORT_DICTIONARIES (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 0 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 8 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet)='METHODS';
+NOTE: The data set WORK._IMPORT_META has 8 observations and 11 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: One or more variables were converted because the data type is not supported by the V9 engine. 
+      For more details, run with options MSGLEVEL=I.
+NOTE: The import data set has 120 observations and 9 variables.
+NOTE: WORK._RAW_IMPORT_METHODS data set was successfully created.
+NOTE: PROCEDURE IMPORT used (Total process time):
+      real time           0.78 seconds
+      cpu time            0.78 seconds
+      
+
+
+NOTE: There were 120 observations read from the data set WORK._RAW_IMPORT_METHODS.
+NOTE: The data set WORK._IMPORT_METHODS has 57 observations and 9 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+17                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+
+
+NOTE: There were 1 observations read from the data set WORK._IMPORT_METHODS.
+NOTE: The data set WORK._IMPORT_METHODS_VARS has 9 observations and 2 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK._PREP_COLUMN_META created, with 9 rows and 16 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.04 seconds
+      
+
+
+NOTE: There were 9 observations read from the data set WORK._PREP_COLUMN_META.
+      WHERE (in_spec+in_data)>0;
+NOTE: The data set WORK._COLUMN_META has 9 observations and 12 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 9 observations read from the data set WORK._COLUMN_META.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 101 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet) not = 'METHODS';
+NOTE: There were 9 observations read from the data set WORK._COLUMN_META.
+NOTE: The data set DEFDATA.SPEC_SHEET_META has 110 observations and 13 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 56 observations read from the data set WORK._IMPORT_METHODS.
+      WHERE UPCASE(PHUSE) not = 'DROP';
+NOTE: The data set DEFDATA.ENTRY_METHODS has 56 observations and 10 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+18                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: Deleting WORK._COLUMN_META (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_META (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_METHODS (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_METHODS_VARS (memtype=DATA).
+NOTE: Deleting WORK._PREP_COLUMN_META (memtype=DATA).
+NOTE: Deleting WORK._RAW_IMPORT_METHODS (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 0 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 4 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet)='COMMENTS';
+NOTE: The data set WORK._IMPORT_META has 4 observations and 11 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: One or more variables were converted because the data type is not supported by the V9 engine. 
+      For more details, run with options MSGLEVEL=I.
+NOTE: The import data set has 30 observations and 5 variables.
+NOTE: WORK._RAW_IMPORT_COMMENTS data set was successfully created.
+NOTE: PROCEDURE IMPORT used (Total process time):
+      real time           0.76 seconds
+      cpu time            0.75 seconds
+      
+
+
+NOTE: There were 30 observations read from the data set WORK._RAW_IMPORT_COMMENTS.
+NOTE: The data set WORK._IMPORT_COMMENTS has 6 observations and 5 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+19                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+
+NOTE: There were 1 observations read from the data set WORK._IMPORT_COMMENTS.
+NOTE: The data set WORK._IMPORT_COMMENTS_VARS has 5 observations and 2 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK._PREP_COLUMN_META created, with 5 rows and 16 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK._PREP_COLUMN_META.
+      WHERE (in_spec+in_data)>0;
+NOTE: The data set WORK._COLUMN_META has 5 observations and 12 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK._COLUMN_META.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 106 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet) not = 'COMMENTS';
+NOTE: There were 5 observations read from the data set WORK._COLUMN_META.
+NOTE: The data set DEFDATA.SPEC_SHEET_META has 111 observations and 13 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK._IMPORT_COMMENTS.
+      WHERE UPCASE(PHUSE) not = 'DROP';
+NOTE: The data set DEFDATA.ENTRY_COMMENTS has 5 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+20                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: Deleting WORK._COLUMN_META (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_COMMENTS (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_COMMENTS_VARS (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_META (memtype=DATA).
+NOTE: Deleting WORK._PREP_COLUMN_META (memtype=DATA).
+NOTE: Deleting WORK._RAW_IMPORT_COMMENTS (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 0 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 3 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet)='DOCUMENTS';
+NOTE: The data set WORK._IMPORT_META has 3 observations and 11 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: One or more variables were converted because the data type is not supported by the V9 engine. 
+      For more details, run with options MSGLEVEL=I.
+NOTE: The import data set has 30 observations and 4 variables.
+NOTE: WORK._RAW_IMPORT_DOCUMENTS data set was successfully created.
+NOTE: PROCEDURE IMPORT used (Total process time):
+      real time           0.78 seconds
+      cpu time            0.79 seconds
+      
+
+
+NOTE: There were 30 observations read from the data set WORK._RAW_IMPORT_DOCUMENTS.
+NOTE: The data set WORK._IMPORT_DOCUMENTS has 3 observations and 4 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+21                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+NOTE: There were 1 observations read from the data set WORK._IMPORT_DOCUMENTS.
+NOTE: The data set WORK._IMPORT_DOCUMENTS_VARS has 4 observations and 2 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK._PREP_COLUMN_META created, with 4 rows and 16 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 4 observations read from the data set WORK._PREP_COLUMN_META.
+      WHERE (in_spec+in_data)>0;
+NOTE: The data set WORK._COLUMN_META has 4 observations and 12 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 4 observations read from the data set WORK._COLUMN_META.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 108 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet) not = 'DOCUMENTS';
+NOTE: There were 4 observations read from the data set WORK._COLUMN_META.
+NOTE: The data set DEFDATA.SPEC_SHEET_META has 112 observations and 13 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 2 observations read from the data set WORK._IMPORT_DOCUMENTS.
+      WHERE UPCASE(PHUSE) not = 'DROP';
+NOTE: The data set DEFDATA.ENTRY_DOCUMENTS has 2 observations and 5 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+22                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: Deleting WORK._COLUMN_META (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_DOCUMENTS (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_DOCUMENTS_VARS (memtype=DATA).
+NOTE: Deleting WORK._IMPORT_META (memtype=DATA).
+NOTE: Deleting WORK._PREP_COLUMN_META (memtype=DATA).
+NOTE: Deleting WORK._RAW_IMPORT_DOCUMENTS (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: The infile "del S:\Biometrics\CNP\ASND0036\phuse_temp\progdoc\ADAM\_tguh_tmp_entryfile_.xlsx" 
+      is:
+      Unnamed Pipe Access Device,
+      PROCESS=del S:\Biometrics\CNP\ASND0036\phuse_temp\progdoc\ADAM\_tguh_tmp_entryfile_.xlsx,
+      RECFM=V,LRECL=32767
+
+NOTE: 0 records were read from the infile "del 
+      S:\Biometrics\CNP\ASND0036\phuse_temp\progdoc\ADAM\_tguh_tmp_entryfile_.xlsx".
+NOTE: DATA statement used (Total process time):
+      real time           0.25 seconds
+      cpu time            0.04 seconds
+      
+
+NOTE: The macro P21SPEC_DEFINE completed compilation without errors.
+      31 instructions 2596 bytes.
+
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+NOTE: There were 14 observations read from the data set DEFDATA.ENTRY_DEFINE.
+NOTE: The data set WORK.TEMP_DEFINE_UPDATED has 16 observations and 6 variables.
+
+NOTE: The macro P21SPEC_AUTOMETHODS completed compilation without errors.
+      76 instructions 4544 bytes.
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 1 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.AUTOMETHODS_VARIABLES_PREP created, with 813 rows and 32 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+23                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+      real time           0.05 seconds
+      cpu time            0.06 seconds
+      
+
+
+NOTE: There were 813 observations read from the data set WORK.AUTOMETHODS_VARIABLES_PREP.
+NOTE: The data set WORK.TEMP_VARIABLES_AUTOMETHODS has 813 observations and 31 variables.
+NOTE: The data set WORK.AUTOMETHODS_METHODS has 192 observations and 9 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 56 observations read from the data set DEFDATA.ENTRY_METHODS.
+NOTE: There were 192 observations read from the data set WORK.AUTOMETHODS_METHODS.
+NOTE: The data set WORK.TEMP_METHODS_AUTOMETHODS has 248 observations and 10 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: Deleting WORK.AUTOMETHODS_METHODS (memtype=DATA).
+NOTE: Deleting WORK.AUTOMETHODS_VARIABLES_PREP (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 3 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.AUTOMETHODS_VARIABLES_PREP created, with 472 rows and 30 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.04 seconds
+      cpu time            0.03 seconds
+      
+24                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+
+
+NOTE: There were 472 observations read from the data set WORK.AUTOMETHODS_VARIABLES_PREP.
+NOTE: The data set WORK.TEMP_VALUELEVEL_AUTOMETHODS has 472 observations and 29 variables.
+NOTE: The data set WORK.AUTOMETHODS_METHODS has 441 observations and 9 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.04 seconds
+      
+
+
+NOTE: There were 248 observations read from the data set WORK.TEMP_METHODS_AUTOMETHODS.
+NOTE: There were 441 observations read from the data set WORK.AUTOMETHODS_METHODS.
+NOTE: The data set WORK.TEMP_METHODS_VL_AUTOMETHODS has 689 observations and 10 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: Deleting WORK.AUTOMETHODS_METHODS (memtype=DATA).
+NOTE: Deleting WORK.AUTOMETHODS_VARIABLES_PREP (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: The macro P21SPEC_AUTOCOMMENTS completed compilation without errors.
+      66 instructions 3540 bytes.
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 5 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Table WORK.AUTOCOMMENTS_VARIABLES_PREP created, with 813 rows and 32 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.04 seconds
+      cpu time            0.06 seconds
+      
+
+25                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+
+NOTE: There were 813 observations read from the data set WORK.AUTOCOMMENTS_VARIABLES_PREP.
+NOTE: The data set WORK.TEMP_VARIABLES_AUTOCOMMENTS has 813 observations and 31 variables.
+NOTE: The data set WORK.AUTOCOMMENTS_COMMENTS has 201 observations and 5 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set DEFDATA.ENTRY_COMMENTS.
+NOTE: There were 201 observations read from the data set WORK.AUTOCOMMENTS_COMMENTS.
+NOTE: The data set WORK.TEMP_COMMENTS_AUTOCOMMENTS has 206 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: Deleting WORK.AUTOCOMMENTS_COMMENTS (memtype=DATA).
+NOTE: Deleting WORK.AUTOCOMMENTS_VARIABLES_PREP (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 7 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Table WORK.AUTOCOMMENTS_VARIABLES_PREP created, with 472 rows and 30 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.06 seconds
+      
+
+
+NOTE: There were 472 observations read from the data set WORK.AUTOCOMMENTS_VARIABLES_PREP.
+NOTE: The data set WORK.TEMP_VALUELEVEL_AUTOCOMMENTS has 472 observations and 29 variables.
+26                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+NOTE: The data set WORK.AUTOCOMMENTS_COMMENTS has 0 observations and 5 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 206 observations read from the data set WORK.TEMP_COMMENTS_AUTOCOMMENTS.
+NOTE: There were 0 observations read from the data set WORK.AUTOCOMMENTS_COMMENTS.
+NOTE: The data set WORK.TEMP_COMMENTS_VL_AUTOCOMMENTS has 206 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: Deleting WORK.AUTOCOMMENTS_COMMENTS (memtype=DATA).
+NOTE: Deleting WORK.AUTOCOMMENTS_VARIABLES_PREP (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: The macro P21SPEC_ADD_CORE completed compilation without errors.
+      87 instructions 6552 bytes.
+
+NOTE: There were 20 observations read from the data set WORK.TEMP_VARIABLES_AUTOCOMMENTS.
+      WHERE SCAN(variable, 1, '.')=':CORE';
+NOTE: The data set WORK.CORE_GROUP_REFERENCES has 20 observations and 3 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 96 observations read from the data set WORK.TEMP_VARIABLES_AUTOCOMMENTS.
+      WHERE not MISSING(__tmp_core_group);
+NOTE: The data set WORK.CORE_GROUP_DEFINITIONS has 96 observations and 31 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+27                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+NOTE: Statement transforms to:
+
+        select COALESCE(CORE_GROUP_REFERENCES.CORE_GROUP, CORE_GROUP_DEFINITIONS.CORE_GROUP) as 
+CORE_GROUP, CORE_GROUP_REFERENCES.DATASET, CORE_GROUP_REFERENCES.__CORE_GROUP_ORDER, 
+CORE_GROUP_DEFINITIONS.PHUSE, CORE_GROUP_DEFINITIONS.INPUT_VARIABLES_DATASETS, 
+CORE_GROUP_DEFINITIONS.VARIABLE, CORE_GROUP_DEFINITIONS.LABEL, CORE_GROUP_DEFINITIONS.DATA_TYPE, 
+CORE_GROUP_DEFINITIONS.CODELIST, CORE_GROUP_DEFINITIONS.ORIGIN, CORE_GROUP_DEFINITIONS.SOURCE, 
+CORE_GROUP_DEFINITIONS.METHOD, CORE_GROUP_DEFINITIONS.METHOD_EXPRESSION_CONTEXT, 
+CORE_GROUP_DEFINITIONS.METHOD_EXPRESSION_CODE, CORE_GROUP_DEFINITIONS.METHOD_DOCUMENT, 
+CORE_GROUP_DEFINITIONS.METHOD_PAGES, CORE_GROUP_DEFINITIONS.PREDECESSOR, 
+CORE_GROUP_DEFINITIONS.HAS_NO_DATA, CORE_GROUP_DEFINITIONS.COMMENT, 
+CORE_GROUP_DEFINITIONS.COMMENT_DOCUMENT, CORE_GROUP_DEFINITIONS.COMMENT_PAGES, 
+CORE_GROUP_DEFINITIONS.DEVELOPER_NOTES, CORE_GROUP_DEFINITIONS.__TMP_CORE_GROUP, 
+CORE_GROUP_DEFINITIONS.ORDER, CORE_GROUP_DEFINITIONS.LENGTH, 
+CORE_GROUP_DEFINITIONS.SIGNIFICANT_DIGITS, CORE_GROUP_DEFINITIONS.FORMAT, 
+CORE_GROUP_DEFINITIONS.MANDATORY, CORE_GROUP_DEFINITIONS.ASSIGNED_VALUE, 
+CORE_GROUP_DEFINITIONS.COMMON, CORE_GROUP_DEFINITIONS.PAGES, CORE_GROUP_DEFINITIONS.ROLE, 
+CORE_GROUP_DEFINITIONS.__CORE_VARIABLE_ORDER
+          from WORK.CORE_GROUP_DEFINITIONS full outer join WORK.CORE_GROUP_REFERENCES on 
+CORE_GROUP_REFERENCES.CORE_GROUP = CORE_GROUP_DEFINITIONS.CORE_GROUP
+      order by CORE_GROUP_REFERENCES.DATASET asc, CORE_GROUP_REFERENCES.__CORE_GROUP_ORDER asc, 
+CORE_GROUP_DEFINITIONS.__CORE_VARIABLE_ORDER asc;
+
+NOTE: Table WORK.EXPANDED_CORE_GROUP_RAW created, with 792 rows and 33 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.05 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 793 observations read from the data set WORK.TEMP_VARIABLES_AUTOCOMMENTS.
+      WHERE SCAN(variable, 1, '.') not = ':CORE';
+NOTE: There were 792 observations read from the data set WORK.EXPANDED_CORE_GROUP_RAW.
+NOTE: The data set WORK.EXPANDED_CORE_GROUP has 1585 observations and 37 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.EXPANDED_CORE_GROUP_DSORD created, with 1585 rows and 38 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.07 seconds
+      cpu time            0.06 seconds
+      
+
+
+NOTE: There were 1585 observations read from the data set WORK.EXPANDED_CORE_GROUP_DSORD.
+NOTE: The data set WORK.EXPANDED_CORE_GROUP_RAWSORT has 1585 observations and 38 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.05 seconds
+      cpu time            0.06 seconds
+      
+28                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+
+
+NOTE: There were 1585 observations read from the data set WORK.EXPANDED_CORE_GROUP_RAWSORT.
+NOTE: The data set WORK.OUTDS_PREPSORT has 1585 observations and 40 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 1585 observations read from the data set WORK.OUTDS_PREPSORT.
+      WHERE not MISSING(dataset);
+NOTE: The data set WORK.OUTDS_SORTED has 1585 observations and 40 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 1585 observations read from the data set WORK.OUTDS_SORTED.
+NOTE: The data set WORK.TEMP_VARIABLES_COREGROUP has 1585 observations and 32 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 21 observations read from the data set DEFDATA.ENTRY_DATASETS.
+NOTE: The data set WORK.TEMP_DATASETS_STANDARD has 21 observations and 17 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: The macro P21SPEC_FINALIZE_DATA completed compilation without errors.
+      75 instructions 3824 bytes.
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 19 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 3 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet)='DEFINE';
+NOTE: The data set WORK.P21_COL_SPEC has 3 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.P21_COL_DATA created, with 6 rows and 2 columns.
+
+29                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+NOTE: Table WORK.P21_COL_ALL created, with 6 rows and 7 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.P21_COL_ALL.
+      WHERE write_ignore not = 1;
+NOTE: The data set WORK._P21_WRITE_COL has 5 observations and 7 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: The query as specified involves ordering by an item that doesn't appear in its SELECT clause.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: The query requires remerging summary statistics back with the original data.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 16 observations read from the data set WORK.TEMP_DEFINE_UPDATED.
+NOTE: The data set WORK._P21_FINAL_EXPORT has 16 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table DEFDATA.P21SPEC_DEFINE created, with 16 rows and 2 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.04 seconds
+      
+
+
+NOTE: Deleting WORK.P21_COL_ALL (memtype=DATA).
+NOTE: Deleting WORK.P21_COL_DATA (memtype=DATA).
+NOTE: Deleting WORK.P21_COL_SPEC (memtype=DATA).
+NOTE: Deleting WORK._P21_FINAL_EXPORT (memtype=DATA).
+NOTE: Deleting WORK._P21_WRITE_COL (memtype=DATA).
+30                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 19 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 15 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet)='DATASETS';
+NOTE: The data set WORK.P21_COL_SPEC has 15 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Table WORK.P21_COL_DATA created, with 17 rows and 2 columns.
+
+NOTE: Table WORK.P21_COL_ALL created, with 17 rows and 7 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.04 seconds
+      
+
+
+NOTE: There were 14 observations read from the data set WORK.P21_COL_ALL.
+      WHERE write_ignore not = 1;
+NOTE: The data set WORK._P21_WRITE_COL has 14 observations and 7 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: The query as specified involves ordering by an item that doesn't appear in its SELECT clause.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.07 seconds
+      
+
+NOTE: The query requires remerging summary statistics back with the original data.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 21 observations read from the data set WORK.TEMP_DATASETS_STANDARD.
+31                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+NOTE: The data set WORK._P21_FINAL_EXPORT has 21 observations and 17 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 21 observations read from the data set WORK._P21_FINAL_EXPORT.
+NOTE: The data set WORK._P21_FINAL_EXPORT has 21 observations and 17 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table DEFDATA.P21SPEC_DATASETS created, with 21 rows and 12 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: Deleting WORK.P21_COL_ALL (memtype=DATA).
+NOTE: Deleting WORK.P21_COL_DATA (memtype=DATA).
+NOTE: Deleting WORK.P21_COL_SPEC (memtype=DATA).
+NOTE: Deleting WORK._P21_FINAL_EXPORT (memtype=DATA).
+NOTE: Deleting WORK._P21_WRITE_COL (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 19 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 31 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet)='VARIABLES';
+NOTE: The data set WORK.P21_COL_SPEC has 31 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+32                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+NOTE: Table WORK.P21_COL_DATA created, with 32 rows and 2 columns.
+
+NOTE: Table WORK.P21_COL_ALL created, with 33 rows and 7 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.04 seconds
+      
+
+
+NOTE: There were 24 observations read from the data set WORK.P21_COL_ALL.
+      WHERE write_ignore not = 1;
+NOTE: The data set WORK._P21_WRITE_COL has 24 observations and 7 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: The query as specified involves ordering by an item that doesn't appear in its SELECT clause.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: The query requires remerging summary statistics back with the original data.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1585 observations read from the data set WORK.TEMP_VARIABLES_COREGROUP.
+NOTE: The data set WORK._P21_FINAL_EXPORT has 1585 observations and 32 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 1585 observations read from the data set WORK._P21_FINAL_EXPORT.
+NOTE: The data set WORK._P21_FINAL_EXPORT has 1585 observations and 32 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.03 seconds
+      
+
+NOTE: Table DEFDATA.P21SPEC_VARIABLES created, with 1585 rows and 22 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.03 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+33                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+      real time           0.03 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: Deleting WORK.P21_COL_ALL (memtype=DATA).
+NOTE: Deleting WORK.P21_COL_DATA (memtype=DATA).
+NOTE: Deleting WORK.P21_COL_SPEC (memtype=DATA).
+NOTE: Deleting WORK._P21_FINAL_EXPORT (memtype=DATA).
+NOTE: Deleting WORK._P21_WRITE_COL (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 19 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 28 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet)='VALUELEVEL';
+NOTE: The data set WORK.P21_COL_SPEC has 28 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.P21_COL_DATA created, with 29 rows and 2 columns.
+
+NOTE: Table WORK.P21_COL_ALL created, with 29 rows and 7 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 21 observations read from the data set WORK.P21_COL_ALL.
+      WHERE write_ignore not = 1;
+NOTE: The data set WORK._P21_WRITE_COL has 21 observations and 7 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: The query as specified involves ordering by an item that doesn't appear in its SELECT clause.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.01 seconds
+34                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+      
+
+NOTE: The query requires remerging summary statistics back with the original data.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 472 observations read from the data set WORK.TEMP_VALUELEVEL_AUTOCOMMENTS.
+NOTE: The data set WORK._P21_FINAL_EXPORT has 472 observations and 29 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 472 observations read from the data set WORK._P21_FINAL_EXPORT.
+NOTE: The data set WORK._P21_FINAL_EXPORT has 472 observations and 29 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Table DEFDATA.P21SPEC_VALUELEVEL created, with 472 rows and 20 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.04 seconds
+      
+
+
+NOTE: Deleting WORK.P21_COL_ALL (memtype=DATA).
+NOTE: Deleting WORK.P21_COL_DATA (memtype=DATA).
+NOTE: Deleting WORK.P21_COL_SPEC (memtype=DATA).
+NOTE: Deleting WORK._P21_FINAL_EXPORT (memtype=DATA).
+NOTE: Deleting WORK._P21_WRITE_COL (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 19 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+35                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+
+
+NOTE: There were 11 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet)='CODELISTS';
+NOTE: The data set WORK.P21_COL_SPEC has 11 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: Table WORK.P21_COL_DATA created, with 12 rows and 2 columns.
+
+NOTE: Table WORK.P21_COL_ALL created, with 12 rows and 7 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 11 observations read from the data set WORK.P21_COL_ALL.
+      WHERE write_ignore not = 1;
+NOTE: The data set WORK._P21_WRITE_COL has 11 observations and 7 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: The query as specified involves ordering by an item that doesn't appear in its SELECT clause.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.04 seconds
+      
+
+NOTE: The query requires remerging summary statistics back with the original data.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 0 observations read from the data set DEFDATA.ENTRY_CODELISTS.
+NOTE: The data set WORK._P21_FINAL_EXPORT has 0 observations and 12 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: Input data set is empty.
+NOTE: The data set WORK._P21_FINAL_EXPORT has 0 observations and 12 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+36                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+      
+
+NOTE: Table DEFDATA.P21SPEC_CODELISTS created, with 0 rows and 10 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: The data set WORK._DUMMY has 1 observations and 1 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 0 observations read from the data set DEFDATA.P21SPEC_CODELISTS.
+NOTE: There were 1 observations read from the data set WORK._DUMMY.
+NOTE: The data set DEFDATA.P21SPEC_CODELISTS has 1 observations and 10 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: Deleting WORK.P21_COL_ALL (memtype=DATA).
+NOTE: Deleting WORK.P21_COL_DATA (memtype=DATA).
+NOTE: Deleting WORK.P21_COL_SPEC (memtype=DATA).
+NOTE: Deleting WORK._DUMMY (memtype=DATA).
+NOTE: Deleting WORK._P21_FINAL_EXPORT (memtype=DATA).
+NOTE: Deleting WORK._P21_WRITE_COL (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 19 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 6 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet)='DICTIONARIES';
+NOTE: The data set WORK.P21_COL_SPEC has 6 observations and 6 variables.
+37                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.P21_COL_DATA created, with 7 rows and 2 columns.
+
+NOTE: Table WORK.P21_COL_ALL created, with 7 rows and 7 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 6 observations read from the data set WORK.P21_COL_ALL.
+      WHERE write_ignore not = 1;
+NOTE: The data set WORK._P21_WRITE_COL has 6 observations and 7 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: The query as specified involves ordering by an item that doesn't appear in its SELECT clause.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: The query requires remerging summary statistics back with the original data.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set DEFDATA.ENTRY_DICTIONARIES.
+NOTE: The data set WORK._P21_FINAL_EXPORT has 5 observations and 7 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table DEFDATA.P21SPEC_DICTIONARIES created, with 5 rows and 5 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.04 seconds
+      
+38                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+
+
+NOTE: Deleting WORK.P21_COL_ALL (memtype=DATA).
+NOTE: Deleting WORK.P21_COL_DATA (memtype=DATA).
+NOTE: Deleting WORK.P21_COL_SPEC (memtype=DATA).
+NOTE: Deleting WORK._P21_FINAL_EXPORT (memtype=DATA).
+NOTE: Deleting WORK._P21_WRITE_COL (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 19 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 9 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet)='METHODS';
+NOTE: The data set WORK.P21_COL_SPEC has 9 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.P21_COL_DATA created, with 10 rows and 2 columns.
+
+NOTE: Table WORK.P21_COL_ALL created, with 10 rows and 7 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 9 observations read from the data set WORK.P21_COL_ALL.
+      WHERE write_ignore not = 1;
+NOTE: The data set WORK._P21_WRITE_COL has 9 observations and 7 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: The query as specified involves ordering by an item that doesn't appear in its SELECT clause.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.03 seconds
+      
+
+NOTE: The query requires remerging summary statistics back with the original data.
+39                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 689 observations read from the data set WORK.TEMP_METHODS_VL_AUTOMETHODS.
+NOTE: The data set WORK._P21_FINAL_EXPORT has 689 observations and 10 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 689 observations read from the data set WORK._P21_FINAL_EXPORT.
+NOTE: The data set WORK._P21_FINAL_EXPORT has 689 observations and 10 variables.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.03 seconds
+      
+
+NOTE: Table DEFDATA.P21SPEC_METHODS created, with 689 rows and 8 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: Deleting WORK.P21_COL_ALL (memtype=DATA).
+NOTE: Deleting WORK.P21_COL_DATA (memtype=DATA).
+NOTE: Deleting WORK.P21_COL_SPEC (memtype=DATA).
+NOTE: Deleting WORK._P21_FINAL_EXPORT (memtype=DATA).
+NOTE: Deleting WORK._P21_WRITE_COL (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 19 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set DEFDATA.SPEC_SHEET_META.
+40                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+      WHERE UPCASE(sheet)='COMMENTS';
+NOTE: The data set WORK.P21_COL_SPEC has 5 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.P21_COL_DATA created, with 6 rows and 2 columns.
+
+NOTE: Table WORK.P21_COL_ALL created, with 6 rows and 7 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set WORK.P21_COL_ALL.
+      WHERE write_ignore not = 1;
+NOTE: The data set WORK._P21_WRITE_COL has 5 observations and 7 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: The query as specified involves ordering by an item that doesn't appear in its SELECT clause.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: The query requires remerging summary statistics back with the original data.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 206 observations read from the data set WORK.TEMP_COMMENTS_VL_AUTOCOMMENTS.
+NOTE: The data set WORK._P21_FINAL_EXPORT has 206 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table DEFDATA.P21SPEC_COMMENTS created, with 206 rows and 4 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+41                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+      cpu time            0.03 seconds
+      
+
+
+NOTE: Deleting WORK.P21_COL_ALL (memtype=DATA).
+NOTE: Deleting WORK.P21_COL_DATA (memtype=DATA).
+NOTE: Deleting WORK.P21_COL_SPEC (memtype=DATA).
+NOTE: Deleting WORK._P21_FINAL_EXPORT (memtype=DATA).
+NOTE: Deleting WORK._P21_WRITE_COL (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.__PREEXEC_WORKDATA created, with 19 rows and 1 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 4 observations read from the data set DEFDATA.SPEC_SHEET_META.
+      WHERE UPCASE(sheet)='DOCUMENTS';
+NOTE: The data set WORK.P21_COL_SPEC has 4 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table WORK.P21_COL_DATA created, with 5 rows and 2 columns.
+
+NOTE: Table WORK.P21_COL_ALL created, with 5 rows and 7 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 4 observations read from the data set WORK.P21_COL_ALL.
+      WHERE write_ignore not = 1;
+NOTE: The data set WORK._P21_WRITE_COL has 4 observations and 7 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: The query as specified involves ordering by an item that doesn't appear in its SELECT clause.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.03 seconds
+      
+42                                          The SAS System             00:13 Tuesday, October 14, 2025
+
+
+NOTE: The query requires remerging summary statistics back with the original data.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 2 observations read from the data set DEFDATA.ENTRY_DOCUMENTS.
+NOTE: The data set WORK._P21_FINAL_EXPORT has 2 observations and 5 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: Table DEFDATA.P21SPEC_DOCUMENTS created, with 2 rows and 3 columns.
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: Deleting WORK.P21_COL_ALL (memtype=DATA).
+NOTE: Deleting WORK.P21_COL_DATA (memtype=DATA).
+NOTE: Deleting WORK.P21_COL_SPEC (memtype=DATA).
+NOTE: Deleting WORK._P21_FINAL_EXPORT (memtype=DATA).
+NOTE: Deleting WORK._P21_WRITE_COL (memtype=DATA).
+NOTE: Deleting WORK.__PREEXEC_WORKDATA (memtype=DATA).
+NOTE: PROCEDURE DATASETS used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+NOTE: The macro P21SPEC_WRITE_SHEET completed compilation without errors.
+      30 instructions 1800 bytes.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 16 observations read from the data set DEFDATA.P21SPEC_DEFINE.
+43                                                   The SAS System                      00:13 Tuesday, October 14, 2025
+
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.06 seconds
+      cpu time            0.04 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 21 observations read from the data set DEFDATA.P21SPEC_DATASETS.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.11 seconds
+      cpu time            0.12 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 1585 observations read from the data set DEFDATA.P21SPEC_VARIABLES.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           7.91 seconds
+      cpu time            7.89 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 472 observations read from the data set DEFDATA.P21SPEC_VALUELEVEL.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           2.46 seconds
+      cpu time            2.39 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 1 observations read from the data set DEFDATA.P21SPEC_CODELISTS.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.11 seconds
+      cpu time            0.07 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+44                                                   The SAS System                      00:13 Tuesday, October 14, 2025
+
+      real time           0.02 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 5 observations read from the data set DEFDATA.P21SPEC_DICTIONARIES.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.04 seconds
+      cpu time            0.04 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.07 seconds
+      
+
+
+NOTE: There were 689 observations read from the data set DEFDATA.P21SPEC_METHODS.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           1.48 seconds
+      cpu time            1.48 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 206 observations read from the data set DEFDATA.P21SPEC_COMMENTS.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.31 seconds
+      cpu time            0.28 seconds
+      
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.02 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 2 observations read from the data set DEFDATA.P21SPEC_DOCUMENTS.
+NOTE: PROCEDURE REPORT used (Total process time):
+      real time           0.04 seconds
+      cpu time            0.06 seconds
+      
+
+NOTE: Writing EXCEL file: 
+      S:\Biometrics\CNP\ASND0036\phuse_temp\progdoc\ADAM\P21_UPLOAD_ADAM_Mapping_Specifications_PHUSE.xlsx
+NOTE: SAS Institute Inc., SAS Campus Drive, Cary, NC USA 27513-2414
+NOTE: The SAS System used:
+      real time           27.98 seconds
+      cpu time            26.51 seconds
+      
