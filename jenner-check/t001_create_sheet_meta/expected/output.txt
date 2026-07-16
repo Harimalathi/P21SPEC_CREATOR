@@ -1,0 +1,103 @@
+
+  Obs         SHEET  SHEETN  ORDER                      LABEL  READ_IGNORE  WRITE_IGNORE
+-----  ------------  ------  -----  -------------------------  -----------  ------------
+    1  Define             1    101  Attribute                            .             .
+    2  Define             1    102  Value                                .             .
+    3  Datasets           2    201  Dataset                              .             .
+    4  Datasets           2    202  Label                                .             .
+    5  Datasets           2    203  Class                                .             .
+    6  Datasets           2    204  SubClass                             .             .
+    7  Datasets           2    205  Structure                            .             .
+    8  Datasets           2    206  Key Variables                        .             .
+    9  Datasets           2    207  Standard                             .             .
+   10  Datasets           2    208  Has No Data                          .             .
+   11  Datasets           2    209  Repeating                            .             .
+   12  Datasets           2    210  Reference Data                       .             .
+   13  Datasets           2    211  Comment                              .             .
+   14  Datasets           2    212  Developer Notes                      .             .
+   15  Variables          3    301  Order                                .             .
+   16  Variables          3    302  Dataset                              .             .
+   17  Variables          3    303  Variable                             .             .
+   18  Variables          3    304  Label                                .             .
+   19  Variables          3    305  Data Type                            .             .
+   20  Variables          3    306  Length                               .             .
+   21  Variables          3    307  Significant Digits                   .             .
+   22  Variables          3    308  Format                               .             .
+   23  Variables          3    309  Mandatory                            .             .
+   24  Variables          3    310  Assigned Value                       .             .
+   25  Variables          3    311  Codelist                             .             .
+   26  Variables          3    312  Common                               .             .
+   27  Variables          3    313  Origin                               .             .
+   28  Variables          3    314  Source                               .             .
+   29  Variables          3    315  Pages                                .             .
+   30  Variables          3    316  Method                               .             .
+   31  Variables          3    317  Method Expression Context            .             1
+   32  Variables          3    318  Method Expression Code               .             1
+   33  Variables          3    319  Method Document                      .             1
+   34  Variables          3    320  Method Pages                         .             1
+   35  Variables          3    321  Predecessor                          .             .
+   36  Variables          3    322  Role                                 .             .
+   37  Variables          3    323  Has No Data                          .             .
+   38  Variables          3    324  Comment                              .             .
+   39  Variables          3    325  Comment Document                     .             1
+   40  Variables          3    326  Comment Pages                        .             1
+   41  Variables          3    327  Developer Notes                      .             .
+   42  Variables          3    328  Core Group                           .             1
+   43  Variables          3    329  _core_variable_note                  1             .
+   44  ValueLevel         4    401  Order                                .             .
+   45  ValueLevel         4    402  Dataset                              .             .
+   46  ValueLevel         4    403  Variable                             .             .
+   47  ValueLevel         4    404  Where Clause                         .             .
+   48  ValueLevel         4    405  Label                                .             .
+   49  ValueLevel         4    406  Data Type                            .             .
+   50  ValueLevel         4    407  Length                               .             .
+   51  ValueLevel         4    408  Significant Digits                   .             .
+   52  ValueLevel         4    409  Format                               .             .
+   53  ValueLevel         4    410  Mandatory                            .             .
+   54  ValueLevel         4    411  Assigned Value                       .             .
+   55  ValueLevel         4    412  Codelist                             .             .
+   56  ValueLevel         4    413  Origin                               .             .
+   57  ValueLevel         4    414  Source                               .             .
+   58  ValueLevel         4    415  Pages                                .             .
+   59  ValueLevel         4    416  Method                               .             .
+   60  ValueLevel         4    417  Method Expression Context            .             1
+   61  ValueLevel         4    418  Method Expression Code               .             1
+   62  ValueLevel         4    419  Method Document                      .             1
+   63  ValueLevel         4    420  Method Pages                         .             1
+   64  ValueLevel         4    421  Predecessor                          .             .
+   65  ValueLevel         4    422  Comment                              .             .
+   66  ValueLevel         4    423  Comment Document                     .             1
+   67  ValueLevel         4    424  Comment Pages                        .             1
+   68  ValueLevel         4    425  Developer Notes                      .             .
+   69  ValueLevel         4    426  Qeval                                .             .
+   70  Codelists          5    501  ID                                   .             .
+   71  Codelists          5    502  Name                                 .             .
+   72  Codelists          5    503  NCI Codelist Code                    .             .
+   73  Codelists          5    504  Data Type                            .             .
+   74  Codelists          5    505  Terminology                          .             .
+   75  Codelists          5    506  Comment                              .             .
+   76  Codelists          5    507  Order                                .             .
+   77  Codelists          5    508  Term                                 .             .
+   78  Codelists          5    509  NCI Term Code                        .             .
+   79  Codelists          5    510  Decoded Value                        .             .
+   80  Dictionaries       6    601  ID                                   .             .
+   81  Dictionaries       6    602  Name                                 .             .
+   82  Dictionaries       6    603  Data Type                            .             .
+   83  Dictionaries       6    604  Dictionary                           .             .
+   84  Dictionaries       6    605  Version                              .             .
+   85  Methods            7    701  ID                                   .             .
+   86  Methods            7    702  Name                                 .             .
+   87  Methods            7    703  Type                                 .             .
+   88  Methods            7    704  Description                          .             .
+   89  Methods            7    705  Expression Context                   .             .
+   90  Methods            7    706  Expression Code                      .             .
+   91  Methods            7    707  Document                             .             .
+   92  Methods            7    708  Pages                                .             .
+   93  Comments           8    801  ID                                   .             .
+   94  Comments           8    802  Description                          .             .
+   95  Comments           8    803  Document                             .             .
+   96  Comments           8    804  Pages                                .             .
+   97  Documents          9    901  ID                                   .             .
+   98  Documents          9    902  Title                                .             .
+   99  Documents          9    903  Href                                 .             .
+

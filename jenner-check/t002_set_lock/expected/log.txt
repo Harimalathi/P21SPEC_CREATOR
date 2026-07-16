@@ -1,0 +1,18 @@
+NOTE: Jenner v1.5.30 (build v1.5.30+unknown.20260715T062217Z.x86_64-unknown-linux-gnu)
+
+NOTE: Option OBS changed to 100.
+NOTE: Fileref _FN_LOCK assigned to ./lock.p21spec_creator.
+NOTE: DATA _null_
+
+NOTE: Writing to fileref _fn_lock (/tmp/work/r_2c2c24c7a0f5499bae03c994b01d8803/lock.p21spec_creator)
+NOTE: DATA _null_ completed. Output written to fileref _fn_lock (/tmp/work/r_2c2c24c7a0f5499bae03c994b01d8803/lock.p21spec_creator)
+NOTE: DATA _null_
+
+NOTE: Reading from fileref ./lock.p21spec_creator (lock.p21spec_creator)
+LOCK ACQUIRED; contents: unknown;01JAN2020 at 43200
+
+NOTE: Read 1 rows from ./lock.p21spec_creator.
+NOTE: Wrote _null_ (1 rows, 1 columns).
+NOTE: DATA elapsed:
+  wall  0.00 seconds
+  cpu   0.00 seconds

@@ -1,0 +1,14 @@
+{
+  "_captured_at": "2026-07-16T05:05:00Z",
+  "_captured_run_id": "r_17efda725e26461cb36be5f352d70ffc",
+  "status": "ok",
+  "exit_code": 0,
+  "log_contains": [
+    "NOTE: Wrote sheet_meta (99 rows, 9 columns).",
+    "NOTE: Wrote defdata.spec_sheet_meta (99 rows, 9 columns).",
+    "NOTE: Deleting SHEET_META (memtype=DATA).",
+    "NOTE: PROC PRINT completed: 99 observations printed, 6 variables"
+  ],
+  "log_does_not_contain": ["ERROR:", "[JENNER-ERROR"],
+  "diagnostics": {"parse_warnings": [], "runtime_warnings": []}
+}

@@ -1,0 +1,25 @@
+NOTE: Jenner v1.5.30 (build v1.5.30+unknown.20260715T062217Z.x86_64-unknown-linux-gnu)
+
+NOTE: Option OBS changed to 100.
+NOTE: Option VALIDVARNAME changed to UPCASE.
+NOTE: Option MCOMPILENOTE changed to ALL.
+NOTE: Library DEFDATA uses 1 concatenated paths.
+NOTE: DATA sheet_meta
+
+
+NOTE: Wrote sheet_meta (99 rows, 9 columns).
+NOTE: DATA elapsed:
+  wall  0.00 seconds
+  cpu   0.00 seconds
+NOTE: PROC SORT data=sheet_meta
+
+NOTE: Read 99 rows from sheet_meta.
+NOTE: Wrote defdata.spec_sheet_meta (99 rows, 9 columns).
+NOTE: PROC SORT statement used.
+NOTE: PROC DATASETS library=WORK
+
+NOTE: Deleting SHEET_META (memtype=DATA).
+NOTE: 1 dataset(s) deleted.
+NOTE: PROC PRINT data=defdata.spec_sheet_meta
+
+NOTE: PROC PRINT completed: 99 observations printed, 6 variables
