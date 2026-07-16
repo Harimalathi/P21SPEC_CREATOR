@@ -1,0 +1,13 @@
+{
+  "_captured_at": "2026-07-16T05:07:00Z",
+  "_captured_run_id": "r_2c2c24c7a0f5499bae03c994b01d8803",
+  "status": "ok",
+  "exit_code": 0,
+  "log_contains": [
+    "NOTE: Fileref _FN_LOCK assigned to ./lock.p21spec_creator.",
+    "LOCK ACQUIRED; contents:",
+    "NOTE: Read 1 rows from ./lock.p21spec_creator."
+  ],
+  "log_does_not_contain": ["ERROR:", "[JENNER-ERROR", "already running p21spec_creator"],
+  "diagnostics": {"parse_warnings": [], "runtime_warnings": []}
+}

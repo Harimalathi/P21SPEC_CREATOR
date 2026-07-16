@@ -1,0 +1,7 @@
+{
+  "bundle": "t002_set_lock",
+  "source_file": "phuse_temp/tools/p21spec_creator/macro/p21spec_set_lock.sas",
+  "source_blob_sha": "a563c9910d1717d2047f2647aee951d80b349574",
+  "source_commit": "4fc045941a528f1e14836ac8012310716a5e41e0",
+  "notes": "Runs %p21spec_set_lock verbatim on its acquire path: with no lock present it writes ./lock.p21spec_creator (sysuserid + date/time) and assigns the _fn_lock fileref, then a follow-up DATA _null_ reads the lock back to confirm the guard fired. Only adaptation: the lockfile path is relative (driver passes an absolute run-folder path). The pinned log lines avoid the date/time inside the lock line, which reflects the run clock."
+}

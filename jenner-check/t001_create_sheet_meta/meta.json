@@ -1,0 +1,7 @@
+{
+  "bundle": "t001_create_sheet_meta",
+  "source_file": "phuse_temp/tools/p21spec_creator/macro/p21spec_create_sheet_meta.sas",
+  "source_blob_sha": "83dd49603c57d28ff7fa95f3123196f9d96fb727",
+  "source_commit": "4fc045941a528f1e14836ac8012310716a5e41e0",
+  "notes": "Runs %p21spec_create_sheet_meta verbatim against the exact col_* column specifications declared in the ADaM driver p21spec_creator.sas. Builds the defdata.spec_sheet_meta control dataset (99 rows across the 9 Define-XML sheets) and honours the leading '*'/'-' label prefixes. Only adaptation: defdata library pointed at WORK (was a local data folder in the driver) so the run is self-contained."
+}
